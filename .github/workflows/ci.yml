@@ -284,9 +284,9 @@ jobs:
         popd
     - name: Build
       run: |
-        mkdir build-android-arm32
-        pushd build-android-arm32
-        cmake -DBUILD_ANDROID=On -DANDROID_ABI=armeabi-v7a -DANDROID_NATIVE_API_LEVEL=23 ..
+        mkdir build-android-x86_64
+        pushd build-android-x86_64
+        cmake -DBUILD_ANDROID=On -DANDROID_ABI=x86_64 -DANDROID_NATIVE_API_LEVEL=23 ..
         make -j2
         popd
   macOS:
