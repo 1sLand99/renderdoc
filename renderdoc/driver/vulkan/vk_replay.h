@@ -119,11 +119,6 @@
 
 #define WINDOW_HANDLE_INIT RDCEraseEl(cocoa);
 
-#elif ENABLED(RDOC_GGP)
-
-#define WINDOW_HANDLE_DECL void *wnd;
-#define WINDOW_HANDLE_INIT wnd = NULL;
-
 #else
 
 #error "Unknown platform"
@@ -515,6 +510,7 @@ private:
   void ClearPostVSCache();
 
   void RefreshDerivedReplacements();
+  void ModifyReplacementIfShaderEXT(ResourceId from, ResourceId &to);
 
   bool RenderTextureInternal(TextureDisplay cfg, const ImageState &imageState,
                              VkRenderPassBeginInfo rpbegin, int flags);
@@ -522,7 +518,6 @@ private:
   bool GetMinMax(ResourceId texid, const Subresource &sub, CompType typeCast, bool stencil,
                  float *minval, float *maxval);
 
-  void CheckVkResult(VkResult vkr);
   VulkanDebugManager *GetDebugManager();
   VulkanResourceManager *GetResourceManager();
 
@@ -671,6 +666,8 @@ private:
   {
     void Init(WrappedVulkan *driver, VkDescriptorPool descriptorPool);
     void Destroy(WrappedVulkan *driver);
+
+    VkPipeline CreateTempMultiviewQuadResolvePipe(WrappedVulkan *driver);
 
     VkDeviceMemory ImageMem = VK_NULL_HANDLE;
     VkDeviceSize ImageMemSize = 0;
@@ -828,6 +825,9 @@ private:
   rdcarray<ResourceDescription> m_Resources;
   rdcarray<DescriptorStoreDescription> m_DescriptorStores;
   std::map<ResourceId, size_t> m_ResourceIdx;
+
+  // tracks VkShaderEXT replacements for shader modules from BuildTargetShader
+  std::map<ResourceId, VkShaderEXT> m_ModuleIDToShaderObject;
 
   VKPipe::State *m_VulkanPipelineState = NULL;
 

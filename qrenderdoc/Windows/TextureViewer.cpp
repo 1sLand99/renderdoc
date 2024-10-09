@@ -97,10 +97,12 @@ static Descriptor MakeDescriptor(ResourceId res, Subresource sub = Subresource()
   return ret;
 }
 
-static UsedDescriptor MakeUsedDescriptor(ResourceId res, Subresource sub = Subresource())
+static UsedDescriptor MakeUsedDescriptor(ShaderStage stage, ResourceId res,
+                                         Subresource sub = Subresource())
 {
   UsedDescriptor ret;
   ret.descriptor = MakeDescriptor(res, sub);
+  ret.access.stage = stage;
   ret.access.type = ret.descriptor.type;
   ret.access.index = DescriptorAccess::NoShaderBinding;
   ret.access.byteSize = 1;
@@ -336,7 +338,8 @@ rdcarray<UsedDescriptor> Following::GetReadOnlyResources(ICaptureContext &ctx, S
 
     // only return copy source for one stage
     if(copy && stage == ShaderStage::Pixel)
-      ret.push_back(MakeUsedDescriptor(curAction->copySource, curAction->copySourceSubresource));
+      ret.push_back(
+          MakeUsedDescriptor(stage, curAction->copySource, curAction->copySourceSubresource));
 
     return ret;
   }
@@ -3125,6 +3128,24 @@ void TextureViewer::OnEventChanged(uint32_t eventId)
       ShaderStage::Vertex, ShaderStage::Hull, ShaderStage::Domain, ShaderStage::Geometry,
       ShaderStage::Pixel,  ShaderStage::Task, ShaderStage::Mesh,
   };
+
+  QFont font = ui->overlay->font();
+  if(m_Ctx.APIProps().pipelineType == GraphicsAPI::Vulkan &&
+     m_Ctx.CurVulkanPipelineState()->multisample.rasterSamples > 1)
+  {
+    font.setItalic(true);
+    ui->overlay->setItemText((int)DebugOverlay::QuadOverdrawDraw, tr("Overdraw (N/A on MSAA)"));
+    ui->overlay->setItemText((int)DebugOverlay::QuadOverdrawPass, tr("Overdraw (N/A on MSAA)"));
+    ui->overlay->setItemData((int)DebugOverlay::QuadOverdrawDraw, font, Qt::FontRole);
+    ui->overlay->setItemData((int)DebugOverlay::QuadOverdrawPass, font, Qt::FontRole);
+  }
+  else
+  {
+    ui->overlay->setItemText((int)DebugOverlay::QuadOverdrawDraw, tr("Quad Overdraw (Draw)"));
+    ui->overlay->setItemText((int)DebugOverlay::QuadOverdrawPass, tr("Quad Overdraw (Pass)"));
+    ui->overlay->setItemData((int)DebugOverlay::QuadOverdrawDraw, font, Qt::FontRole);
+    ui->overlay->setItemData((int)DebugOverlay::QuadOverdrawPass, font, Qt::FontRole);
+  }
 
   int count = 7;
 

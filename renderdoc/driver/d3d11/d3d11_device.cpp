@@ -25,6 +25,7 @@
 
 #include "d3d11_device.h"
 #include "core/core.h"
+#include "core/settings.h"
 #include "driver/dxgi/dxgi_wrapped.h"
 #include "jpeg-compressor/jpge.h"
 #include "maths/formatpacking.h"
@@ -37,6 +38,8 @@
 #include "d3d11_replay.h"
 #include "d3d11_resources.h"
 #include "d3d11_shader_cache.h"
+
+RDOC_EXTERN_CONFIG(bool, Replay_Debug_PrintChunkTimings);
 
 WRAPPED_POOL_INST(WrappedID3D11Device);
 
@@ -1519,19 +1522,28 @@ RDResult WrappedID3D11Device::ReadLogInitialisation(RDCFile *rdc, bool storeStru
     }
   }
 
+  const bool develMode =
 #if ENABLED(RDOC_DEVEL)
-  for(auto it = chunkInfos.begin(); it != chunkInfos.end(); ++it)
-  {
-    double dcount = double(it->second.count);
-
-    RDCDEBUG(
-        "% 5d chunks - Time: %9.3fms total/%9.3fms avg - Size: %8.3fMB total/%7.3fMB avg - %s (%u)",
-        it->second.count, it->second.total, it->second.total / dcount,
-        double(it->second.totalsize) / (1024.0 * 1024.0),
-        double(it->second.totalsize) / (dcount * 1024.0 * 1024.0),
-        GetChunkName((uint32_t)it->first).c_str(), uint32_t(it->first));
-  }
+      true;
+#else
+      false;
 #endif
+
+  if(Replay_Debug_PrintChunkTimings() || develMode)
+  {
+    for(auto it = chunkInfos.begin(); it != chunkInfos.end(); ++it)
+    {
+      double dcount = double(it->second.count);
+
+      RDCLOG(
+          "| % 5d chunks - Time: %9.3fms total/%9.3fms avg - Size: %8.3fMB total/%7.3fMB avg - %s "
+          "(%u)",
+          it->second.count, it->second.total, it->second.total / dcount,
+          double(it->second.totalsize) / (1024.0 * 1024.0),
+          double(it->second.totalsize) / (dcount * 1024.0 * 1024.0),
+          GetChunkName((uint32_t)it->first).c_str(), uint32_t(it->first));
+    }
+  }
 
   GetReplay()->WriteFrameRecord().frameInfo.uncompressedFileSize =
       rdc->GetSectionProperties(sectionIdx).uncompressedSize;
@@ -1830,21 +1842,28 @@ void WrappedID3D11Device::ReportDeath(ID3D11DeviceChild *obj)
 
   ID3D11DeviceChild *texObj = obj;
 
-  ResourceRange range = ResourceRange::Null;
-
   // backbuffers and their views are destroyed immediately to accommodate D3D's refcounting rules for
   // backbuffers. For views, get the resource to check and for everything else check the object directly
   if(WrappedID3D11ShaderResourceView1::IsAlloc(obj))
-    range = ResourceRange((WrappedID3D11ShaderResourceView1 *)obj);
+  {
+    WrappedID3D11ShaderResourceView1 *view = (WrappedID3D11ShaderResourceView1 *)obj;
+    texObj = view->GetResourceRange().GetResource();
+  }
   else if(WrappedID3D11UnorderedAccessView1::IsAlloc(obj))
-    range = ResourceRange((WrappedID3D11UnorderedAccessView1 *)obj);
+  {
+    WrappedID3D11UnorderedAccessView1 *view = (WrappedID3D11UnorderedAccessView1 *)obj;
+    texObj = view->GetResourceRange().GetResource();
+  }
   else if(WrappedID3D11RenderTargetView1::IsAlloc(obj))
-    range = ResourceRange((WrappedID3D11RenderTargetView1 *)obj);
+  {
+    WrappedID3D11RenderTargetView1 *view = (WrappedID3D11RenderTargetView1 *)obj;
+    texObj = view->GetResourceRange().GetResource();
+  }
   else if(WrappedID3D11DepthStencilView::IsAlloc(obj))
-    range = ResourceRange((WrappedID3D11DepthStencilView *)obj);
-
-  if(range.GetResource() != NULL)
-    texObj = range.GetResource();
+  {
+    WrappedID3D11DepthStencilView *view = (WrappedID3D11DepthStencilView *)obj;
+    texObj = view->GetResourceRange().GetResource();
+  }
 
   // if this is a wrapped 2D texture and is a backbuffer, destroy whatever object we were reporting
   // the death of and stop

@@ -1,7 +1,7 @@
 /******************************************************************************
  * The MIT License (MIT)
  *
- * Copyright (c) 2019-2024 Baldur Karlsson
+ * Copyright (c) 2024 Baldur Karlsson
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,23 +22,42 @@
  * THE SOFTWARE.
  ******************************************************************************/
 
-#include "os/os_specific.h"
+#pragma once
 
-#include <time.h>
-#include <unistd.h>
+#include <functional>
 
-double Timing::GetTickFrequency()
+#include "api/replay/resourceid.h"
+#include "common/threading.h"
+
+struct GPUAddressRange
 {
-  return 1000000.0;
-}
+  using Address = uint64_t;
 
-uint64_t Timing::GetTick()
-{
-  timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return uint64_t(ts.tv_sec) * 1000000000ULL + uint32_t(ts.tv_nsec & 0xffffffff);
-}
+  Address start, realEnd, oobEnd;
+  ResourceId id;
 
-void Threading::SetCurrentThreadName(const rdcstr &name)
+  bool operator<(const Address &o) const
+  {
+    if(o < start)
+      return true;
+
+    return false;
+  }
+};
+
+struct GPUAddressRangeTracker
 {
-}
+  GPUAddressRangeTracker() {}
+  // no copying
+  GPUAddressRangeTracker(const GPUAddressRangeTracker &) = delete;
+  GPUAddressRangeTracker &operator=(const GPUAddressRangeTracker &) = delete;
+
+  rdcarray<GPUAddressRange> addresses;
+  Threading::RWLock addressLock;
+
+  void AddTo(const GPUAddressRange &range);
+  void RemoveFrom(const GPUAddressRange &range);
+  void GetResIDFromAddr(GPUAddressRange::Address addr, ResourceId &id, uint64_t &offs);
+  void GetResIDFromAddrAllowOutOfBounds(GPUAddressRange::Address addr, ResourceId &id,
+                                        uint64_t &offs);
+};

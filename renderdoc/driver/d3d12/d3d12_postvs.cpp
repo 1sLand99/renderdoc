@@ -33,6 +33,7 @@
 #include "d3d12_debug.h"
 #include "d3d12_device.h"
 #include "d3d12_replay.h"
+#include "d3d12_rootsig.h"
 #include "d3d12_shader_cache.h"
 
 RDOC_CONFIG(rdcstr, D3D12_Debug_PostVSDumpDirPath, "",
@@ -99,8 +100,20 @@ static void PayloadBufferCopy(PayloadCopyDir dir, DXIL::ProgramEditor &editor, D
     const uint32_t alignment = RDCMAX(4U, memberType->bitWidth / 8);
     Constant *align = editor.CreateConstant(alignment);
 
-    Constant *payloadGep = editor.CreateConstantGEP(
-        editor.GetPointerType(memberType, gepChain[0]->type->addrSpace), gepChain);
+    Value *payloadGep = NULL;
+    if(cast<GlobalVar>(gepChain[0]))
+    {
+      payloadGep = editor.CreateConstantGEP(
+          editor.GetPointerType(memberType, gepChain[0]->type->addrSpace), gepChain);
+    }
+    else
+    {
+      payloadGep = editor.InsertInstruction(
+          f, curInst++,
+          editor.CreateInstruction(Operation::GetElementPtr,
+                                   editor.GetPointerType(memberType, gepChain[0]->type->addrSpace),
+                                   gepChain));
+    }
 
     Instruction *offset = editor.CreateInstruction(
         Operation::Add, i32, {baseOffset, editor.CreateConstant(uavByteOffset)});
@@ -409,7 +422,7 @@ static void AddDXILAmpShaderPayloadStores(const DXBC::DXBCContainer *dxbc, uint3
   }
 
   // find the dispatchMesh call, and from there the global groupshared variable that's the payload
-  GlobalVar *payloadVariable = NULL;
+  Value *payloadVariable = NULL;
   Type *payloadType = NULL;
   for(size_t i = 0; i < f->instructions.size(); i++)
   {
@@ -422,13 +435,7 @@ static void AddDXILAmpShaderPayloadStores(const DXBC::DXBCContainer *dxbc, uint3
         RDCERR("Unexpected number of arguments to dispatchMesh");
         continue;
       }
-      payloadVariable = cast<GlobalVar>(inst.args[4]);
-      if(!payloadVariable)
-      {
-        RDCERR("Unexpected non-variable payload argument to dispatchMesh");
-        continue;
-      }
-
+      payloadVariable = inst.args[4];
       payloadType = (Type *)payloadVariable->type;
 
       RDCASSERT(payloadType->type == Type::Pointer);
@@ -913,7 +920,7 @@ static void ConvertToFixedDXILAmpFeeder(const DXBC::DXBCContainer *dxbc, uint32_
   }
 
   // find the dispatchMesh call, and from there the global groupshared variable that's the payload
-  GlobalVar *payloadVariable = NULL;
+  Value *payloadVariable = NULL;
   Type *payloadType = NULL;
   for(size_t i = 0; i < f->instructions.size(); i++)
   {
@@ -926,13 +933,7 @@ static void ConvertToFixedDXILAmpFeeder(const DXBC::DXBCContainer *dxbc, uint32_
         RDCERR("Unexpected number of arguments to dispatchMesh");
         continue;
       }
-      payloadVariable = cast<GlobalVar>(inst.args[4]);
-      if(!payloadVariable)
-      {
-        RDCERR("Unexpected non-variable payload argument to dispatchMesh");
-        continue;
-      }
-
+      payloadVariable = inst.args[4];
       payloadType = (Type *)payloadVariable->type;
 
       RDCASSERT(payloadType->type == Type::Pointer);
@@ -946,6 +947,10 @@ static void ConvertToFixedDXILAmpFeeder(const DXBC::DXBCContainer *dxbc, uint32_
   // GEPs in future. We'll swizzle these to the start when copying to/from buffers still
   RDCASSERT(payloadType && payloadType->type == Type::Struct);
   payloadType->members.append({i32, i32, i32, i32});
+
+  f->valueSymtabOrder.removeIf([](const Value *v) {
+    return v->kind() == ValueKind::Instruction || v->kind() == ValueKind::BasicBlock;
+  });
 
   // recreate the function with our own instructions
   f->instructions.clear();
@@ -1064,6 +1069,10 @@ static void ConvertToFixedDXILAmpFeeder(const DXBC::DXBCContainer *dxbc, uint32_
       editor.AddInstruction(f, editor.CreateInstruction(Operation::ExtractVal, i32,
                                                         {dimAndOffset, editor.CreateLiteral(3)}));
 
+  // If the payload variable is not a globalvar, need to add the instruction that creates it
+  if(!cast<GlobalVar>(payloadVariable))
+    editor.AddInstruction(f, cast<Instruction>(payloadVariable));
+
   size_t curInst = f->instructions.size();
   // start at 16 bytes, to account for our own data
   uint32_t uavByteOffset = 16;
@@ -1077,11 +1086,23 @@ static void ConvertToFixedDXILAmpFeeder(const DXBC::DXBCContainer *dxbc, uint32_
   for(size_t i = 0; i < 4; i++)
   {
     Value *srcs[] = {dimX, dimY, dimZ, offset};
-
-    Constant *dst = editor.CreateConstantGEP(
-        editor.GetPointerType(i32, payloadVariable->type->addrSpace),
-        {payloadVariable, i32_0,
-         editor.CreateConstant(uint32_t(payloadType->members.size() - 4 + i))});
+    Value *dst = NULL;
+    if(cast<GlobalVar>(payloadVariable))
+    {
+      dst = editor.CreateConstantGEP(
+          editor.GetPointerType(i32, payloadVariable->type->addrSpace),
+          {payloadVariable, i32_0,
+           editor.CreateConstant(uint32_t(payloadType->members.size() - 4 + i))});
+    }
+    else
+    {
+      dst = editor.AddInstruction(
+          f, editor.CreateInstruction(
+                 Operation::GetElementPtr,
+                 editor.GetPointerType(i32, payloadVariable->type->addrSpace),
+                 {payloadVariable, i32_0,
+                  editor.CreateConstant(uint32_t(payloadType->members.size() - 4 + i))}));
+    }
 
     DXIL::Instruction *store = editor.CreateInstruction(Operation::Store);
 
@@ -2181,6 +2202,9 @@ void D3D12Replay::InitPostMSBuffers(uint32_t eventId)
 
   modsig = ((WrappedID3D12RootSignature *)rootsig)->sig;
 
+  modsig.Flags &= ~(D3D12_ROOT_SIGNATURE_FLAG_DENY_AMPLIFICATION_SHADER_ROOT_ACCESS |
+                    D3D12_ROOT_SIGNATURE_FLAG_DENY_MESH_SHADER_ROOT_ACCESS);
+
   uint32_t space = modsig.maxSpaceIndex;
 
   // add root UAV elements
@@ -2208,12 +2232,9 @@ void D3D12Replay::InitPostMSBuffers(uint32_t eventId)
   ID3D12RootSignature *annotatedSig = NULL;
 
   {
-    ID3DBlob *blob = m_pDevice->GetShaderCache()->MakeRootSig(modsig);
-    HRESULT hr =
-        m_pDevice->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(),
-                                       __uuidof(ID3D12RootSignature), (void **)&annotatedSig);
-
-    SAFE_RELEASE(blob);
+    bytebuf blob = EncodeRootSig(m_pDevice->RootSigVersion(), modsig);
+    HRESULT hr = m_pDevice->CreateRootSignature(
+        0, blob.data(), blob.size(), __uuidof(ID3D12RootSignature), (void **)&annotatedSig);
 
     if(annotatedSig == NULL || FAILED(hr))
     {
@@ -2932,9 +2953,9 @@ void D3D12Replay::InitPostVSBuffers(uint32_t eventId)
     {
       rootsig.Flags |= D3D12_ROOT_SIGNATURE_FLAG_ALLOW_STREAM_OUTPUT;
 
-      ID3DBlob *blob = m_pDevice->GetShaderCache()->MakeRootSig(rootsig);
+      bytebuf blob = EncodeRootSig(m_pDevice->RootSigVersion(), rootsig);
 
-      hr = m_pDevice->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(),
+      hr = m_pDevice->CreateRootSignature(0, blob.data(), blob.size(),
                                           __uuidof(ID3D12RootSignature), (void **)&soSig);
       if(FAILED(hr))
       {
@@ -2943,8 +2964,6 @@ void D3D12Replay::InitPostVSBuffers(uint32_t eventId)
         RDCERR("%s", ret.vsout.status.c_str());
         return;
       }
-
-      SAFE_RELEASE(blob);
     }
   }
 
@@ -3304,7 +3323,7 @@ void D3D12Replay::InitPostVSBuffers(uint32_t eventId)
     byte *byteData = NULL;
     D3D12_RANGE range = {0, (SIZE_T)m_SOBufferSize};
     hr = m_SOStagingBuffer->Map(0, &range, (void **)&byteData);
-    m_pDevice->CheckHRESULT(hr);
+    CHECK_HR(m_pDevice, hr);
     if(FAILED(hr))
     {
       RDCERR("Failed to map sobuffer HRESULT: %s", ToStr(hr).c_str());
@@ -3579,7 +3598,7 @@ void D3D12Replay::InitPostVSBuffers(uint32_t eventId)
 
       D3D12_QUERY_DATA_SO_STATISTICS *data;
       hr = m_SOStagingBuffer->Map(0, &range, (void **)&data);
-      m_pDevice->CheckHRESULT(hr);
+      CHECK_HR(m_pDevice, hr);
       if(FAILED(hr))
       {
         RDCERR("Couldn't get SO statistics data");
@@ -3764,7 +3783,7 @@ void D3D12Replay::InitPostVSBuffers(uint32_t eventId)
 
         D3D12_QUERY_DATA_SO_STATISTICS *data;
         hr = m_SOStagingBuffer->Map(0, &range, (void **)&data);
-        m_pDevice->CheckHRESULT(hr);
+        CHECK_HR(m_pDevice, hr);
         if(FAILED(hr))
         {
           RDCERR("Couldn't get SO statistics data");
@@ -3840,7 +3859,7 @@ void D3D12Replay::InitPostVSBuffers(uint32_t eventId)
     byte *byteData = NULL;
     D3D12_RANGE range = {0, (SIZE_T)m_SOBufferSize};
     hr = m_SOStagingBuffer->Map(0, &range, (void **)&byteData);
-    m_pDevice->CheckHRESULT(hr);
+    CHECK_HR(m_pDevice, hr);
     if(FAILED(hr))
     {
       RDCERR("Failed to map sobuffer HRESULT: %s", ToStr(hr).c_str());

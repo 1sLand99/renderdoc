@@ -23,6 +23,7 @@
  ******************************************************************************/
 
 #include "common/formatting.h"
+#include "strings/string_utils.h"
 #include "dxil_bytecode.h"
 #include "dxil_common.h"
 
@@ -287,89 +288,88 @@ EntryPointInterface::Signature::Signature(const Metadata *signature)
   startCol = getival<int8_t>(signature->children[SignatureElement::StartCol]);
 }
 
-EntryPointInterface::ResourceBase::ResourceBase(ResourceClass resourceClass,
-                                                const Metadata *resourceBase)
+EntryPointInterface::ResourceBase::ResourceBase(ResourceClass resourceClass, const Metadata *md)
     : resClass(resourceClass)
 {
-  id = getival<uint32_t>(resourceBase->children[(size_t)ResField::ID]);
-  type = resourceBase->children[(size_t)ResField::VarDecl]->type;
-  name = resourceBase->children[(size_t)ResField::Name]->str;
-  space = getival<uint32_t>(resourceBase->children[(size_t)ResField::Space]);
-  regBase = getival<uint32_t>(resourceBase->children[(size_t)ResField::RegBase]);
-  regCount = getival<uint32_t>(resourceBase->children[(size_t)ResField::RegCount]);
-}
-
-EntryPointInterface::SRV::SRV(const Metadata *srv) : ResourceBase(ResourceClass::SRV, srv)
-{
-  shape = getival<ResourceKind>(srv->children[(size_t)ResField::SRVShape]);
-  sampleCount = getival<uint32_t>(srv->children[(size_t)ResField::SRVSampleCount]);
-  const Metadata *tags = srv->children[(size_t)ResField::SRVTags];
-  for(size_t t = 0; tags && t < tags->children.size(); t += 2)
+  id = getival<uint32_t>(md->children[(size_t)ResField::ID]);
+  type = md->children[(size_t)ResField::VarDecl]->type;
+  name = md->children[(size_t)ResField::Name]->str;
+  space = getival<uint32_t>(md->children[(size_t)ResField::Space]);
+  regBase = getival<uint32_t>(md->children[(size_t)ResField::RegBase]);
+  regCount = getival<uint32_t>(md->children[(size_t)ResField::RegCount]);
+  if(resourceClass == ResourceClass::SRV)
   {
-    RDCASSERT(tags->children[t]->isConstant);
-    ResourcesTag tag = getival<ResourcesTag>(tags->children[t]);
-    switch(tag)
+    SRV &srv = srvData;
+    srv.shape = getival<ResourceKind>(md->children[(size_t)ResField::SRVShape]);
+    srv.sampleCount = getival<uint32_t>(md->children[(size_t)ResField::SRVSampleCount]);
+    const Metadata *tags = md->children[(size_t)ResField::SRVTags];
+    for(size_t t = 0; tags && t < tags->children.size(); t += 2)
     {
-      case ResourcesTag::ElementType:
-        compType = getival<ComponentType>(tags->children[t + 1]);
-        break;
-      case ResourcesTag::StructStride:
-        elementStride = getival<uint32_t>(tags->children[t + 1]);
-        break;
-      default: break;
+      RDCASSERT(tags->children[t]->isConstant);
+      ResourcesTag tag = getival<ResourcesTag>(tags->children[t]);
+      switch(tag)
+      {
+        case ResourcesTag::ElementType:
+          srv.compType = getival<ComponentType>(tags->children[t + 1]);
+          break;
+        case ResourcesTag::StructStride:
+          srv.elementStride = getival<uint32_t>(tags->children[t + 1]);
+          break;
+        default: break;
+      }
     }
   }
-}
-
-EntryPointInterface::UAV::UAV(const Metadata *uav) : ResourceBase(ResourceClass::UAV, uav)
-{
-  shape = getival<ResourceKind>(uav->children[(size_t)ResField::UAVShape]);
-  globallCoherent = (getival<uint32_t>(uav->children[(size_t)ResField::UAVGloballyCoherent]) == 1);
-  hasCounter = (getival<uint32_t>(uav->children[(size_t)ResField::UAVHiddenCounter]) == 1);
-  rasterizerOrderedView = (getival<uint32_t>(uav->children[(size_t)ResField::UAVRasterOrder]) == 1);
-  const Metadata *tags = uav->children[(size_t)ResField::UAVTags];
-  for(size_t t = 0; tags && t < tags->children.size(); t += 2)
+  else if(resourceClass == ResourceClass::UAV)
   {
-    RDCASSERT(tags->children[t]->isConstant);
-    ResourcesTag tag = getival<ResourcesTag>(tags->children[t]);
-    switch(tag)
+    UAV &uav = uavData;
+    uav.shape = getival<ResourceKind>(md->children[(size_t)ResField::UAVShape]);
+    uav.globallCoherent =
+        (getival<uint32_t>(md->children[(size_t)ResField::UAVGloballyCoherent]) == 1);
+    uav.hasCounter = (getival<uint32_t>(md->children[(size_t)ResField::UAVHiddenCounter]) == 1);
+    uav.rasterizerOrderedView =
+        (getival<uint32_t>(md->children[(size_t)ResField::UAVRasterOrder]) == 1);
+    const Metadata *tags = md->children[(size_t)ResField::UAVTags];
+    for(size_t t = 0; tags && t < tags->children.size(); t += 2)
     {
-      case ResourcesTag::ElementType:
-        compType = getival<ComponentType>(tags->children[t + 1]);
-        break;
-      case ResourcesTag::StructStride:
-        elementStride = getival<uint32_t>(tags->children[t + 1]);
-        break;
-      case ResourcesTag::SamplerFeedbackKind:
-        samplerFeedback = getival<SamplerFeedbackType>(tags->children[t + 1]);
-        break;
-      case ResourcesTag::Atomic64Use:
-        atomic64Use = (getival<uint32_t>(tags->children[t + 1]) == 1);
-        break;
-      default: break;
+      RDCASSERT(tags->children[t]->isConstant);
+      ResourcesTag tag = getival<ResourcesTag>(tags->children[t]);
+      switch(tag)
+      {
+        case ResourcesTag::ElementType:
+          uav.compType = getival<ComponentType>(tags->children[t + 1]);
+          break;
+        case ResourcesTag::StructStride:
+          uav.elementStride = getival<uint32_t>(tags->children[t + 1]);
+          break;
+        case ResourcesTag::SamplerFeedbackKind:
+          uav.samplerFeedback = getival<SamplerFeedbackType>(tags->children[t + 1]);
+          break;
+        case ResourcesTag::Atomic64Use:
+          uav.atomic64Use = (getival<uint32_t>(tags->children[t + 1]) == 1);
+          break;
+        default: break;
+      }
     }
   }
-}
-
-EntryPointInterface::CBuffer::CBuffer(const Metadata *cbuffer)
-    : ResourceBase(ResourceClass::CBuffer, cbuffer)
-{
-  sizeInBytes = getival<uint32_t>(cbuffer->children[(size_t)ResField::CBufferByteSize]);
-  const Metadata *tags = cbuffer->children[(size_t)ResField::CBufferTags];
-  for(size_t t = 0; tags && t < tags->children.size(); t += 2)
+  else if(resourceClass == ResourceClass::CBuffer)
   {
-    RDCASSERT(tags->children[t]->isConstant);
-    ResourcesTag tag = getival<ResourcesTag>(tags->children[t]);
-    if(tag == ResourcesTag::IsTBufferTag)
-      isTBuffer = (getival<uint32_t>(tags->children[t + 1]) == 1);
+    CBuffer &cbuffer = cbufferData;
+    cbuffer.sizeInBytes = getival<uint32_t>(md->children[(size_t)ResField::CBufferByteSize]);
+    const Metadata *tags = md->children[(size_t)ResField::CBufferTags];
+    for(size_t t = 0; tags && t < tags->children.size(); t += 2)
+    {
+      RDCASSERT(tags->children[t]->isConstant);
+      ResourcesTag tag = getival<ResourcesTag>(tags->children[t]);
+      if(tag == ResourcesTag::IsTBufferTag)
+        cbuffer.isTBuffer = (getival<uint32_t>(tags->children[t + 1]) == 1);
+    }
+    cbuffer.cbufferRefl = NULL;
   }
-  cbufferRefl = NULL;
-}
-
-EntryPointInterface::Sampler::Sampler(const Metadata *sampler)
-    : ResourceBase(ResourceClass::Sampler, sampler)
-{
-  samplerType = getival<SamplerKind>(sampler->children[(size_t)ResField::SamplerType]);
+  else if(resourceClass == ResourceClass::Sampler)
+  {
+    Sampler &sampler = samplerData;
+    sampler.samplerType = getival<SamplerKind>(md->children[(size_t)ResField::SamplerType]);
+  }
 }
 
 EntryPointInterface::EntryPointInterface(const Metadata *entryPoint)
@@ -411,26 +411,26 @@ EntryPointInterface::EntryPointInterface(const Metadata *entryPoint)
     if(srvsMeta)
     {
       for(size_t i = 0; i < srvsMeta->children.size(); ++i)
-        srvs.push_back(srvsMeta->children[i]);
+        srvs.push_back(ResourceBase(ResourceClass::SRV, srvsMeta->children[i]));
     }
 
     const Metadata *uavsMeta = resources->children[1];
     if(uavsMeta)
     {
       for(size_t i = 0; i < uavsMeta->children.size(); ++i)
-        uavs.push_back(uavsMeta->children[i]);
+        uavs.push_back(ResourceBase(ResourceClass::UAV, uavsMeta->children[i]));
     }
     const Metadata *cbuffersMeta = resources->children[2];
     if(cbuffersMeta)
     {
       for(size_t i = 0; i < cbuffersMeta->children.size(); ++i)
-        cbuffers.push_back(cbuffersMeta->children[i]);
+        cbuffers.push_back(ResourceBase(ResourceClass::CBuffer, cbuffersMeta->children[i]));
     }
     const Metadata *samplersMeta = resources->children[3];
     if(samplersMeta)
     {
       for(size_t i = 0; i < samplersMeta->children.size(); ++i)
-        samplers.push_back(samplersMeta->children[i]);
+        samplers.push_back(ResourceBase(ResourceClass::Sampler, samplersMeta->children[i]));
     }
   }
   /*
@@ -584,6 +584,7 @@ void Program::FetchComputeProperties(DXBC::Reflection *reflection)
       param.compCount = 3;
       param.regChannelMask = param.channelUsedMask = 0x7;
       param.semanticIdxName = param.semanticName = "threadIdInGroup";
+      param.varType = VarType::UInt;
       reflection->InputSig.push_back(param);
     }
     else if(f.name.beginsWith("dx.op.threadId"))
@@ -593,6 +594,7 @@ void Program::FetchComputeProperties(DXBC::Reflection *reflection)
       param.compCount = 3;
       param.regChannelMask = param.channelUsedMask = 0x7;
       param.semanticIdxName = param.semanticName = "threadId";
+      param.varType = VarType::UInt;
       reflection->InputSig.push_back(param);
     }
     else if(f.name.beginsWith("dx.op.groupId"))
@@ -602,6 +604,7 @@ void Program::FetchComputeProperties(DXBC::Reflection *reflection)
       param.compCount = 3;
       param.regChannelMask = param.channelUsedMask = 0x7;
       param.semanticIdxName = param.semanticName = "groupID";
+      param.varType = VarType::UInt;
       reflection->InputSig.push_back(param);
     }
     else if(f.name.beginsWith("dx.op.flattenedThreadIdInGroup"))
@@ -611,6 +614,7 @@ void Program::FetchComputeProperties(DXBC::Reflection *reflection)
       param.compCount = 1;
       param.regChannelMask = param.channelUsedMask = 0x1;
       param.semanticIdxName = param.semanticName = "flattenedThreadIdInGroup";
+      param.varType = VarType::UInt;
       reflection->InputSig.push_back(param);
     }
 
@@ -985,29 +989,11 @@ VarType VarTypeForComponentType(ComponentType compType)
     case ComponentType::F32: varType = VarType::Float; break;
     case ComponentType::F64: varType = VarType::Double; break;
     case ComponentType::SNormF16:
-      varType = VarType::Half;
-      RDCERR("Unexpected type in cbuffer annotations");
-      break;
-    case ComponentType::UNormF16:
-      varType = VarType::Half;
-      RDCERR("Unexpected type in cbuffer annotations");
-      break;
+    case ComponentType::UNormF16: varType = VarType::Half; break;
     case ComponentType::SNormF32:
-      varType = VarType::Float;
-      RDCERR("Unexpected type in cbuffer annotations");
-      break;
-    case ComponentType::UNormF32:
-      varType = VarType::Float;
-      RDCERR("Unexpected type in cbuffer annotations");
-      break;
+    case ComponentType::UNormF32: varType = VarType::Float; break;
     case ComponentType::SNormF64:
-      varType = VarType::Double;
-      RDCERR("Unexpected type in cbuffer annotations");
-      break;
-    case ComponentType::UNormF64:
-      varType = VarType::Double;
-      RDCERR("Unexpected type in cbuffer annotations");
-      break;
+    case ComponentType::UNormF64: varType = VarType::Double; break;
   }
   return varType;
 }
@@ -1475,12 +1461,32 @@ rdcarray<ShaderEntryPoint> Program::GetEntryPoints()
   return ret;
 }
 
-DXBC::Reflection *Program::GetReflection()
+void Program::FetchEntryPoint()
+{
+  if(m_EntryPoint.empty())
+  {
+    DXMeta dx(m_NamedMeta);
+    if(dx.entryPoints && dx.entryPoints->children.size() > 0 &&
+       dx.entryPoints->children[0]->children.size() > 2)
+    {
+      m_EntryPoint = dx.entryPoints->children[0]->children[1]->str;
+    }
+    else
+    {
+      RDCERR("Didn't find dx.entryPoints");
+      m_EntryPoint = "main";
+    }
+  }
+}
+
+DXBC::Reflection *Program::BuildReflection()
 {
   const bool dxcStyleFormatting = m_DXCStyle;
   using namespace DXBC;
 
   Reflection *refl = new Reflection;
+  Files.clear();
+  m_CompileFlags.flags.clear();
 
   DXMeta dx(m_NamedMeta);
 
@@ -1543,13 +1549,25 @@ DXBC::Reflection *Program::GetReflection()
     {
       if(f->children.size() != 2)
         continue;
-      Files.push_back({f->children[0]->str, f->children[1]->str});
+      bool found = false;
+      rdcstr shaderFilePath = standardise_directory_separator(f->children[0]->str);
+      for(const ShaderSourceFile &shaderSource : Files)
+      {
+        if(shaderSource.filename == shaderFilePath)
+        {
+          found = true;
+          break;
+        }
+      }
+
+      if(!found)
+        Files.push_back({shaderFilePath, f->children[1]->str});
     }
 
     // push the main filename to the front
     if(dx.source.mainFileName && !dx.source.mainFileName->children.empty())
     {
-      rdcstr mainFile = dx.source.mainFileName->children[0]->str;
+      rdcstr mainFile = standardise_directory_separator(dx.source.mainFileName->children[0]->str);
 
       if(!mainFile.empty())
       {
@@ -1563,6 +1581,8 @@ DXBC::Reflection *Program::GetReflection()
         }
       }
     }
+    if(!Files.empty())
+      m_CompileFlags.flags.push_back({"preferSourceDebug", "1"});
   }
 
   if(dx.source.args && dx.source.args->children.size() == 1)
@@ -1728,16 +1748,57 @@ rdcstr Program::GetDebugStatus()
 
 void Program::GetLineInfo(size_t instruction, uintptr_t offset, LineColumnInfo &lineInfo) const
 {
+  bool getEntryPoint = (instruction == ~0U);
+  if(getEntryPoint)
+    RDCASSERT(!m_EntryPoint.empty());
+
   lineInfo = LineColumnInfo();
 
   for(size_t i = 0; i < m_Functions.size(); i++)
   {
     const Function &f = *m_Functions[i];
 
-    if(instruction < f.instructions.size())
+    bool getLineInfo = (getEntryPoint) ? false : (instruction < f.instructions.size());
+    if(getEntryPoint)
     {
-      lineInfo.disassemblyLine = f.instructions[instruction]->disassemblyLine;
-      break;
+      if(f.name == m_EntryPoint)
+      {
+        getLineInfo = true;
+        instruction = 0;
+      }
+    }
+    if(getLineInfo)
+    {
+      const Instruction *const inst = f.instructions[instruction];
+      uint32_t dbgLoc = inst->debugLoc;
+      if(dbgLoc != ~0U)
+      {
+        const DebugLocation &debugLoc = m_DebugLocations[dbgLoc];
+        int32_t fileIndex = -1;
+        Metadata *scope = debugLoc.scope;
+        const DIBase *const dwarfInfo = scope->dwarf;
+        rdcstr shaderFilePath = standardise_directory_separator(GetDebugScopeFilePath(dwarfInfo));
+        RDCASSERT(!shaderFilePath.empty());
+        for(int32_t iFile = 0; iFile < Files.count(); iFile++)
+        {
+          rdcstr filePath = Files[iFile].filename;
+          if(filePath == shaderFilePath)
+          {
+            fileIndex = iFile;
+            break;
+          }
+        }
+
+        lineInfo.fileIndex = fileIndex;
+        lineInfo.lineStart = (uint32_t)debugLoc.line;
+        lineInfo.lineEnd = (uint32_t)debugLoc.line;
+        // Without column end data ignore the column start data in DebugLocation
+        lineInfo.colStart = 0;
+        lineInfo.colEnd = 0;
+      }
+
+      lineInfo.disassemblyLine = inst->disassemblyLine;
+      return;
     }
     instruction -= f.instructions.size();
   }
@@ -1758,6 +1819,16 @@ void Program::GetLocals(const DXBC::DXBCContainer *dxbc, size_t instruction, uin
                         rdcarray<SourceVariableMapping> &locals) const
 {
   locals.clear();
+
+  for(const LocalSourceVariable &localVar : m_Locals)
+  {
+    if(localVar.startInst > instruction)
+      continue;
+    if(instruction > localVar.endInst)
+      continue;
+
+    locals.append(localVar.sourceVars);
+  }
 }
 
 const ResourceReference *Program::GetResourceReference(const rdcstr &handleStr) const

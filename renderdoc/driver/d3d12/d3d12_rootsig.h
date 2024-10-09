@@ -1,7 +1,7 @@
 /******************************************************************************
  * The MIT License (MIT)
  *
- * Copyright (c) 2019-2024 Baldur Karlsson
+ * Copyright (c) 2024 Baldur Karlsson
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,43 +22,15 @@
  * THE SOFTWARE.
  ******************************************************************************/
 
-#include <dlfcn.h>
-#include "hooks/hooks.h"
+#pragma once
 
-// No hooks needed for GGP.
-void LibraryHooks::BeginHookRegistration()
-{
-}
+#include "d3d12_common.h"
 
-bool LibraryHooks::Detect(const char *identifier)
-{
-  return dlsym(RTLD_DEFAULT, identifier) != NULL;
-}
-
-void LibraryHooks::EndHookRegistration()
-{
-}
-
-void LibraryHooks::RemoveHooks()
-{
-}
-
-void LibraryHooks::ReplayInitialise()
-{
-}
-
-void LibraryHooks::Refresh()
-{
-}
-
-void LibraryHooks::IgnoreLibrary(const char *libraryName)
-{
-}
-
-void LibraryHooks::RegisterLibraryHook(char const *name, FunctionLoadCallback cb)
-{
-}
-
-void LibraryHooks::RegisterFunctionHook(const char *libraryName, const FunctionHook &hook)
-{
-}
+D3D12RootSignature DecodeRootSig(const void *data, size_t dataSize,
+                                 bool withStandardContainer = true);
+bytebuf EncodeRootSig(D3D_ROOT_SIGNATURE_VERSION targetVersion,
+                      const rdcarray<D3D12_ROOT_PARAMETER1> &params,
+                      D3D12_ROOT_SIGNATURE_FLAGS Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE,
+                      UINT NumStaticSamplers = 0,
+                      const D3D12_STATIC_SAMPLER_DESC1 *StaticSamplers = NULL);
+bytebuf EncodeRootSig(D3D_ROOT_SIGNATURE_VERSION targetVersion, const D3D12RootSignature &rootsig);

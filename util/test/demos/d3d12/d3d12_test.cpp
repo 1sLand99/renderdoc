@@ -375,6 +375,8 @@ bool D3D12GraphicsTest::Init()
   devConfig = devPtrs.config;
   d3d12Debug = devPtrs.debug;
 
+  m_SingletonDevice = (devFactory == NULL);
+
   dev = CreateDevice(adapters, minFeatureLevel);
   if(!dev)
     return false;
@@ -499,7 +501,7 @@ void D3D12GraphicsTest::PostDeviceCreate()
 
     desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 
-    desc.NumDescriptors = 8;
+    desc.NumDescriptors = 128;
     desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
 
     CHECK_HR(dev->CreateDescriptorHeap(&desc, __uuidof(ID3D12DescriptorHeap), (void **)&m_Sampler));
@@ -1427,7 +1429,8 @@ ID3DBlobPtr D3D12GraphicsTest::Compile(std::string src, std::string entry, std::
         hr = result->GetErrorBuffer(&dxcErrors);
         if(SUCCEEDED(hr) && dxcErrors)
         {
-          TEST_ERROR("Failed to compile DXC shader: %s", dxcErrors->GetBufferPointer());
+          TEST_ERROR("Failed to compile DXC shader: %.*s", (int)dxcErrors->GetBufferSize(),
+                     (char *)dxcErrors->GetBufferPointer());
         }
         else
         {
@@ -1457,7 +1460,8 @@ ID3DBlobPtr D3D12GraphicsTest::Compile(std::string src, std::string entry, std::
 
     if(FAILED(hr))
     {
-      TEST_ERROR("Failed to compile shader, error %x / %s", hr,
+      int numChars = error ? (int)error->GetBufferSize() : 1024;
+      TEST_ERROR("Failed to compile shader, error %x / %.*s", hr, numChars,
                  error ? (char *)error->GetBufferPointer() : "Unknown");
       return NULL;
     }

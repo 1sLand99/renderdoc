@@ -334,6 +334,8 @@ enum
 
 DECLARE_REFLECTION_STRUCT(VkBaseInStructure);
 
+#define CHECK_VKR(core, vkr_or_expr) core->CheckVkResult(__FILE__, __LINE__, vkr_or_expr)
+
 // we cast to this type when serialising as a placeholder indicating that
 // the given flags field doesn't have any bits defined
 enum VkFlagWithNoBits
@@ -2176,13 +2178,6 @@ DECLARE_DESERIALISE_TYPE(VkImportAndroidHardwareBufferInfoANDROID);
 DECLARE_DESERIALISE_TYPE(VkMemoryGetAndroidHardwareBufferInfoANDROID);
 DECLARE_DESERIALISE_TYPE(VkExternalFormatANDROID);
 DECLARE_DESERIALISE_TYPE(VkAndroidHardwareBufferFormatProperties2ANDROID);
-#endif
-
-// GGP only structs
-#ifdef VK_USE_PLATFORM_GGP
-DECLARE_REFLECTION_STRUCT(VkPresentFrameTokenGGP);
-
-DECLARE_DESERIALISE_TYPE(VkPresentFrameTokenGGP);
 #endif
 
 // we add these fake enums so we have a type for type-dispatch in the serialiser. Due to C ABI rules
